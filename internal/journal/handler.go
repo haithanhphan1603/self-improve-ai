@@ -2,6 +2,7 @@ package journal
 
 import (
 	"net/http"
+	"self-improve-ai/internal/ai"
 	"self-improve-ai/pkg/middleware"
 	"time"
 
@@ -19,7 +20,7 @@ func RegisterRoutes(r *gin.Engine, db *gorm.DB) {
 	journalGroup.Use(middleware.AuthMiddleware())
 	journalGroup.POST("/", handler.CreateEntry)
 	journalGroup.GET("/", handler.ListEntries)
-	journalGroup.POST("/:id", handler.GetEntry)
+	journalGroup.GET("/:id", handler.GetEntry)
 	journalGroup.GET("/streak", handler.GetStreak)
 }
 
@@ -141,4 +142,25 @@ func (h *Handler) GetStreak(c *gin.Context) {
 		"last_entry":     entries[0].EntryDate.Format("2006-01-02"),
 		"today_logged":   len(entries) > 0 && entries[0].EntryDate.Truncate(24*time.Hour).Equal(today),
 	})
+}
+
+func (h *Handler) GenerateAIFeedBack(c *gin.Context) {
+	var entry JournalEntry
+	userId := c.MustGet("user_id")
+	id := c.Param("id")
+	if err := h.DB.Where("user_id = ? and id = ?", userId, id).First(&entry).Error; err != nil {
+		c.JSON(http.StatusNotFound, gin.H{"error": "entry not found"})
+		return
+	}
+
+	summary, feedback, err := ai.GetJournalFeedback(entry.Content)
+	if err != nil {
+		c.JSON(http.StatusInternalServerError, gin.H{"error": "AI feedback failed"})
+		return
+	}
+	entry.AI_Summary = summary
+	entry.AI_Feedback = feedback
+
+	h.DB.Save(&entry)
+	c.JSON(http.StatusOK, entry)
 }
